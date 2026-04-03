@@ -16,9 +16,12 @@ const ThreeScene = ({ data }) => {
         camera-controls
         touch-action="pan-y"
         disable-zoom
-        camera-orbit="30deg 75deg 105%"
+        camera-orbit="30deg 75deg 75%"
         min-camera-orbit="auto 75deg auto"
         max-camera-orbit="auto 75deg auto"
+        shadow-intensity="1.5"
+        environment-intensity="1.2"
+        exposure="1.2"
         style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
       ></model-viewer>
 

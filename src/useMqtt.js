@@ -1,85 +1,57 @@
+// Replace useMqtt.js entirely with this
 import { useState, useEffect, useRef } from 'react';
-import mqtt from 'mqtt';
 
-// --- Simulation helpers ---
-const rand = (min, max) => Math.random() * (max - min) + min;
-const randInt = (min, max) => Math.floor(rand(min, max));
+const THINGSPEAK_CHANNEL = import.meta.env.VITE_THINGSPEAK_CHANNEL;
+const THINGSPEAK_API_KEY = import.meta.env.VITE_THINGSPEAK_API_KEY;
+const POLL_INTERVAL = 20000; // every 20s matches ESP32 publish rate
 
-const generateSimulatedData = (t) => ({
-  node: 'Node1',
-  timestamp: new Date().toISOString(),
-  dht11: {
-    temp: parseFloat((27 + 5 * Math.sin(t / 20)).toFixed(1)),
-    humidity: parseFloat((55 + 15 * Math.sin(t / 30 + 1)).toFixed(1)),
-  },
-  bmp180: { pressure: parseFloat((1013 + 5 * Math.sin(t / 40)).toFixed(2)) },
-  mpu6050: {
-    ax: parseFloat((0.1 * Math.sin(t / 5)).toFixed(3)),
-    ay: parseFloat((-0.3 + 0.2 * Math.cos(t / 7)).toFixed(3)),
-    az: parseFloat((9.8 + 0.05 * Math.sin(t / 3)).toFixed(3)),
-  },
-  noise: randInt(500, 780),
-  flow: parseFloat((2 + 1.5 * Math.abs(Math.sin(t / 15))).toFixed(2)),
-  co2: randInt(400, 900),
-  co: randInt(5, 30),
-});
+const fetchThingSpeak = async () => {
+  const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL}/feeds/last.json?api_key=${THINGSPEAK_API_KEY}`;
+  const res  = await fetch(url);
+  const json = await res.json();
+
+  // ThingSpeak fields map to what ESP32 sends:
+  // field1 = temp, field2 = hum, field3 = co2, field4 = co
+  return {
+    node: 'thermal_plant_01',
+    timestamp: json.created_at,
+    dht11: {
+      temp:     parseFloat(json.field1),
+      humidity: parseFloat(json.field2),
+    },
+    bmp180:  { pressure: 1013.25 },
+    mpu6050: { ax: 0, ay: 0, az: 9.8 },
+    noise: 500,
+    flow:  2.5,
+    co2: parseFloat(json.field3),
+    co:  parseFloat(json.field4),
+  };
+};
 
 const useMqtt = () => {
-  const [data, setData] = useState(null);
+  const [data, setData]           = useState(null);
   const [connected, setConnected] = useState(false);
-  const connectedRef = useRef(false); // track live status without re-render loops
-  const simTickRef = useRef(0);
+  const simTickRef                = useRef(0);
 
   useEffect(() => {
-    // ----- Simulation interval (runs always; pauses output when MQTT is live) -----
-    const simInterval = setInterval(() => {
-      if (!connectedRef.current) {
-        simTickRef.current += 1;
-        setData(generateSimulatedData(simTickRef.current));
+    // Try ThingSpeak immediately on mount
+    const fetchAndSet = async () => {
+      try {
+        const live = await fetchThingSpeak();
+        setData(live);
+        setConnected(true);
+        console.log('✅ ThingSpeak live data:', live);
+      } catch (e) {
+        console.warn('ThingSpeak fetch failed, using simulation:', e);
+        setConnected(false);
       }
-    }, 2000);
-
-    // ----- MQTT connection to HiveMQ Cloud -----
-    console.log('Connecting to MQTT broker...');
-    const client = mqtt.connect(
-      'wss://bf0c2aed638d4a048ca7768d70b23253.s1.eu.hivemq.cloud:8883/mqtt',
-      {
-        clientId: `mqttjs_` + Math.random().toString(16).substr(2, 8),
-        username: 'Esp32_C6',
-        password: 'Miniproject1',
-        protocol: 'wss',
-      }
-    );
-
-    client.on('connect', () => {
-      console.log('Connected to MQTT successfully!');
-      connectedRef.current = true;
-      setConnected(true);
-      client.subscribe('tinyml/anomaly', (err) => {
-        if (!err) console.log('Subscribed to tinyml/anomaly');
-        else console.error('Subscription error', err);
-      });
-    });
-
-    client.on('message', (topic, message) => {
-      if (topic === 'tinyml/anomaly') {
-        try {
-          const payload = JSON.parse(message.toString());
-          if (payload.node === 'Node1') setData(payload);
-        } catch (e) {
-          console.error('Failed to parse MQTT message:', e);
-        }
-      }
-    });
-
-    client.on('error', (err) => { console.error('MQTT error:', err); client.end(); });
-    client.on('close', () => { console.log('MQTT closed.'); connectedRef.current = false; setConnected(false); });
-    client.on('offline', () => { console.log('MQTT offline.'); connectedRef.current = false; setConnected(false); });
-
-    return () => {
-      clearInterval(simInterval);
-      client.end();
     };
+
+    fetchAndSet(); // immediate first fetch
+
+    const interval = setInterval(fetchAndSet, POLL_INTERVAL);
+
+    return () => clearInterval(interval);
   }, []);
 
   return { data, connected };
