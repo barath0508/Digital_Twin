@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 
 const THINGSPEAK_CHANNEL = import.meta.env.VITE_THINGSPEAK_CHANNEL;
 const THINGSPEAK_API_KEY = import.meta.env.VITE_THINGSPEAK_API_KEY;
-const POLL_INTERVAL = 20000; // every 20s matches ESP32 publish rate
+const POLL_INTERVAL = 5000; // every 20s matches ESP32 publish rate
 
 const fetchThingSpeak = async () => {
   const url = `https://api.thingspeak.com/channels/${THINGSPEAK_CHANNEL}/feeds/last.json?api_key=${THINGSPEAK_API_KEY}`;
